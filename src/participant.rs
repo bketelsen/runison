@@ -1,4 +1,4 @@
-use crate::common::{Config, Message, Node};
+use crate::common::{Config, Message, Node, Status};
 
 use message_io::events::EventQueue;
 use message_io::network::{Endpoint, NetEvent, Network};
@@ -16,6 +16,7 @@ pub struct Participant {
     network: Network,
     name: String,
     debug: bool,
+    status: Status,
     discovery_endpoint: Endpoint,
     public_addr: SocketAddr,
     known_participants: HashMap<String, Endpoint>, // Used only for free resources later
@@ -48,6 +49,7 @@ impl Participant {
                     config,
                     event_queue,
                     debug,
+                    status: Status::Starting,
                     network,
                     name: name.to_string(),
                     discovery_endpoint: endpoint,
@@ -77,6 +79,9 @@ impl Participant {
         if self.debug {
             println!("[Root: {:?}]", self.config.root.path);
         };
+
+        // Update Status
+        self.status = Status::Indexing;
 
         let config = self.config.clone();
         let rp = String::from(config.root.path.clone());
@@ -150,9 +155,12 @@ impl Participant {
                         }
                         Message::ServerStatus(status) => {
                             println!("status: {:?}", status);
-
-                            let message = Message::GetNodes();
-                            self.network.send(self.discovery_endpoint, message);
+                            if status == Status::Running {
+                                let message = Message::GetNodes();
+                                self.network.send(self.discovery_endpoint, message);
+                            } else {
+                                println!("Server not ready. Current status: {:?}", status);
+                            }
                         }
 
                         Message::NodeList(list) => {

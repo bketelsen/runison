@@ -76,6 +76,9 @@ impl DiscoveryServer {
             println!("[Root: {:?}]", self.config.root.path);
         };
 
+        // Update Status to Indexing
+        self.status = Status::Indexing;
+
         let config = self.config.clone();
         let rp = String::from(config.root.path.clone());
         //  self.entries

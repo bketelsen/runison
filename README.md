@@ -32,3 +32,16 @@ quote from Unison docs:
 * It displays all the updated paths to the user. For updates that do not conflict, it suggests a default action (propagating the new contents from the updated replica to the other). Conflicting updates are just displayed. The user is given an opportunity to examine the current state of affairs, change the default actions for nonconflicting updates, and choose actions for conflicting updates.
 * It performs the selected actions, one at a time. Each action is performed by first transferring the new contents to a temporary file on the receiving host, then atomically moving them into place.
 * It updates its archive files to reflect the new state of the replicas.
+
+## Notes & Todos
+
+* Looks like [if/let](https://doc.rust-lang.org/stable/rust-by-example/flow_control/if_let.html) is a nicer way to do some of the things I'm currently doing with match/unwrap. Investigate more.
+```
+    // If you need to specify a failure, use an else:
+    if let Some(i) = letter {
+        println!("Matched {:?}!", i);
+    } else {
+        // Destructure failed. Change to the failure case.
+        println!("Didn't match a number. Let's go with a letter!");
+    }
+```

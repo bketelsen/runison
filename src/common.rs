@@ -90,7 +90,8 @@ pub fn get_config(path: &str) -> Result<Config, figment::Error> {
     Figment::new().merge(Toml::file(path)).extract()
 }
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Clone)]
+// Operational status of the process
 pub enum Status {
     Starting,
     Indexing,
