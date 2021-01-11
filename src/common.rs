@@ -136,6 +136,7 @@ pub enum Message {
     UnregisterParticipant(String),
     GetStatus(),
     GetNodes(),
+    GetChangeset(BTreeMap<String, Node>),
 
     // From DiscoveryServer
     ParticipantList(Vec<(String, SocketAddr)>),
@@ -143,6 +144,8 @@ pub enum Message {
     ParticipantNotificationRemoved(String),
     ServerStatus(Status),
     NodeList(BTreeMap<String, Node>),
+
+    Changeset(Vec<Change>),
 
     // From Participant to Participant
     Greetings(String, String), //name and grettings
@@ -203,7 +206,7 @@ pub struct Participant {
 pub struct Synchronizer {
     pub entries: BTreeMap<String, Node>,
     config: Config,
-    first_run: bool,
+    pub first_run: bool,
 }
 impl Synchronizer {
     pub fn new(config: Config) -> Option<Synchronizer> {
@@ -294,9 +297,58 @@ impl Synchronizer {
             bincode::serialize_into(f, &self.entries).unwrap();
         }
     }
+    pub fn remote_changes(&mut self, tree: BTreeMap<String, Node>) -> Option<Vec<Change>> {
+        println!("Detecting file changeset...");
+
+        let started = Instant::now();
+        let mut changes = Vec::new();
+        for (path, node) in &self.entries {
+            if let Some(remote) = tree.get(path) {
+                // exists in both, check for change
+                if !node.is_dir && node.modified != remote.modified {
+                    // changed file
+                    changes.push(Change {
+                        change_type: ChangeType::Modified,
+                        node: node.clone(),
+                    })
+                }
+            } else {
+                // doesn't exist in previous, is new file
+                changes.push(Change {
+                    change_type: ChangeType::Added,
+                    node: node.clone(),
+                })
+            }
+        }
+        for (path, local) in tree {
+            match self.entries.get(&path) {
+                Some(_) => {}
+                None => {
+                    // current file is deleted
+
+                    changes.push(Change {
+                        change_type: ChangeType::Deleted,
+                        node: local.clone(),
+                    })
+                }
+            }
+        }
+
+        println!(
+            "Done creating changeset in {}",
+            HumanDuration(started.elapsed())
+        );
+        if changes.len() > 0 {
+            return Some(changes);
+        }
+
+        None
+    }
     pub fn local_changes(&mut self) -> Option<Vec<Change>> {
         println!("Detecting changed files...");
-
+        if self.first_run {
+            return None;
+        }
         let started = Instant::now();
         let pb = ProgressBar::new_spinner();
         pb.enable_steady_tick(200);

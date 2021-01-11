@@ -77,6 +77,10 @@ impl Participant {
         // create index
         self.synchronizer.index();
 
+        self.status = Status::Running;
+
+        // need logic/state here to determine what to do.
+
         if let Some(changes) = self.synchronizer.local_changes() {
             println!("Got {:?} changes", changes.len());
             for change in changes {
@@ -86,6 +90,12 @@ impl Participant {
 
         let message = Message::RegisterParticipant(self.name.clone(), self.public_addr);
         self.client.network.send(self.discovery_endpoint, message);
+
+        if self.synchronizer.first_run {
+            let message = Message::GetChangeset(self.synchronizer.entries.clone());
+            self.client.network.send(self.discovery_endpoint, message);
+        }
+
         loop {
             match self.client.event_queue.receive() {
                 // Waiting events
@@ -138,6 +148,12 @@ impl Participant {
 
                         Message::NodeList(list) => {
                             self.reconcile(list);
+                        }
+
+                        Message::Changeset(changes) => {
+                            for change in changes {
+                                println!("{:#?}:{:#?}", change.change_type, change.node.path);
+                            }
                         }
                         _ => unreachable!(),
                     },

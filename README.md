@@ -45,3 +45,15 @@ quote from Unison docs:
         println!("Didn't match a number. Let's go with a letter!");
     }
 ```
+* strip root path before sending changesets around
+* straighten out remote_changes
+```
+Added:"/Users/bjk/src/github.com/bketelsen/runison/test/root1" -> this is the root
+Added:"/Users/bjk/src/github.com/bketelsen/runison/test/root1/blue.txt"
+Added:"/Users/bjk/src/github.com/bketelsen/runison/test/root1/brian"
+Added:"/Users/bjk/src/github.com/bketelsen/runison/test/root1/brian/hello.txt"
+Added:"/Users/bjk/src/github.com/bketelsen/runison/test/root1/hello.txt"
+Added:"/Users/bjk/src/github.com/bketelsen/runison/test/root1/my.sharona"
+Deleted:"/Users/bjk/src/github.com/bketelsen/runison/test/root2" -> this is the root
+Deleted:"/Users/bjk/src/github.com/bketelsen/runison/test/root2/bob.txt" -> this is new
+```

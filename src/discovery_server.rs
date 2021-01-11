@@ -95,6 +95,18 @@ impl DiscoveryServer {
                                 Message::NodeList(self.synchronizer.entries.clone()),
                             );
                         }
+
+                        Message::GetChangeset(remote_tree) => {
+                            if self.debug {
+                                println!("[GetChangeset: {:?}]", endpoint)
+                            };
+
+                            if let Some(changes) = &self.synchronizer.remote_changes(remote_tree) {
+                                self.client
+                                    .network
+                                    .send(endpoint, Message::Changeset(changes.to_vec()));
+                            }
+                        }
                         _ => unreachable!(),
                     },
                     NetEvent::AddedEndpoint(_) => (),
