@@ -58,6 +58,8 @@ impl DiscoveryServer {
 
         // create index
         self.synchronizer.index();
+
+        self.status = Status::Running;
         loop {
             match self.client.event_queue.receive() {
                 Event::Network(net_event) => match net_event {

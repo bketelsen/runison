@@ -203,15 +203,21 @@ pub struct Participant {
 pub struct Synchronizer {
     pub entries: BTreeMap<String, Node>,
     config: Config,
+    first_run: bool,
 }
 impl Synchronizer {
     pub fn new(config: Config) -> Option<Synchronizer> {
         Some(Synchronizer {
             entries: BTreeMap::new(),
             config,
+            first_run: false,
         })
     }
-    fn move_index(&mut self) {
+    fn move_index(&mut self) -> io::Result<()> {
+        // skip the move if the file won't be there
+        if self.first_run {
+            return Ok(());
+        }
         let config = self.config.clone();
         let rp = String::from(config.root.path.clone());
 
@@ -221,11 +227,16 @@ impl Synchronizer {
         let mut newarchive = PathBuf::from(&rp);
         newarchive.push(".runison-previous");
         println!("Moving index to {:?}", newarchive.display());
-        fs::rename(archive, newarchive); // Rename a.txt to b.txt
+        fs::rename(archive, newarchive) // Rename a.txt to b.txt
     }
     pub fn index(&mut self) {
         let started = Instant::now();
-        self.move_index();
+        match self.move_index() {
+            Ok(_) => {}
+            Err(_) => {
+                self.first_run = true;
+            }
+        }
         println!("Indexing files...");
         let pb = ProgressBar::new_spinner();
         pb.enable_steady_tick(200);
@@ -303,6 +314,7 @@ impl Synchronizer {
         let mut oldarchive = PathBuf::from(&rp);
         oldarchive.push(".runison-previous");
 
+        // TODO: If there is no current, then there is no local changeset.
         let current = std::fs::File::open(archive).unwrap();
         let reader = BufReader::new(current);
 
@@ -312,20 +324,16 @@ impl Synchronizer {
             Ok(current_archive) => {
                 let previous = std::fs::File::open(oldarchive).unwrap();
                 let preader = BufReader::new(previous);
-
                 let pa: std::result::Result<BTreeMap<String, Node>, Box<bincode::ErrorKind>> =
                     bincode::deserialize_from(preader);
-
                 match pa {
                     Ok(previous_archive) => {
                         let mut changes = Vec::new();
-                        // first get deletions
                         for (path, node) in &current_archive {
                             if let Some(prev) = previous_archive.get(path) {
                                 // exists in both, check for change
                                 if !node.is_dir && node.modified != prev.modified {
                                     // changed file
-
                                     pb.set_message(node.name.clone().to_str().unwrap());
                                     pb.tick();
                                     changes.push(Change {
@@ -335,7 +343,6 @@ impl Synchronizer {
                                 }
                             } else {
                                 // doesn't exist in previous, is new file
-
                                 pb.set_message(node.name.clone().to_str().unwrap());
                                 pb.tick();
                                 changes.push(Change {
@@ -344,9 +351,6 @@ impl Synchronizer {
                                 })
                             }
                         }
-
-                        // then additions
-
                         for (path, prev) in previous_archive {
                             match &current_archive.get(&path) {
                                 Some(_) => {}
@@ -362,10 +366,8 @@ impl Synchronizer {
                                 }
                             }
                         }
-                        // then changes
 
                         pb.finish_and_clear();
-
                         println!(
                             "Done scanning local changes in {}",
                             HumanDuration(started.elapsed())
