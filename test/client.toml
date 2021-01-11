@@ -12,5 +12,6 @@ name = [
     ".*~"
 ]
 path = [
-    "*node_modules*"
+    "*node_modules*",
+    "*target*"
 ]

@@ -6,7 +6,7 @@ use glob::Pattern;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 use walkdir::{DirEntry, WalkDir};
 
 use indicatif::{HumanDuration, ProgressBar, ProgressStyle};
@@ -28,6 +28,7 @@ pub struct Node {
     pub is_file: bool,
     pub is_symlink: bool,
     pub name: OsString,
+    pub path: String,
     pub len: u64,
     pub modified: std::time::SystemTime,
     pub inode: u64,
@@ -38,6 +39,7 @@ impl Node {
         is_file: bool,
         is_symlink: bool,
         name: OsString,
+        path: String,
         len: u64,
         modified: std::time::SystemTime,
         inode: u64,
@@ -47,15 +49,22 @@ impl Node {
             is_file,
             is_symlink,
             name,
+            path,
             len,
             modified,
             inode,
         })
     }
     pub fn from_path(path: &str, config: &Config) -> Option<Node> {
-        let root_buf = PathBuf::from(path);
+        // add the root path back to the given path to get the full file path
+        let config = config.clone();
+        let rp = String::from(config.root.path.clone());
+        let mut pathbuf = PathBuf::from(&rp);
+        pathbuf.push(path);
 
-        let metadata = std::fs::metadata(&root_buf).unwrap();
+        // get the metadata of the file
+        // TODO: handle error for bad symlinks
+        let metadata = std::fs::metadata(&pathbuf).unwrap();
         let inode = metadata.ino();
         let filetype = metadata.file_type();
 
@@ -64,6 +73,7 @@ impl Node {
             is_file: filetype.is_file(),
             is_symlink: filetype.is_symlink(),
             name: PathBuf::from(path).file_name().unwrap().to_os_string(),
+            path: pathbuf.to_str().unwrap().to_string(),
             len: metadata.len(),
             modified: metadata.modified().unwrap(),
             inode,
@@ -106,7 +116,19 @@ pub enum Status {
     Running,
     Stopping,
 }
+#[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Clone)]
 
+pub enum ChangeType {
+    Added,
+    Modified,
+    Deleted,
+}
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+
+pub struct Change {
+    pub change_type: ChangeType,
+    pub node: Node,
+}
 #[derive(Serialize, Deserialize)]
 pub enum Message {
     // To DiscoveryServer
@@ -129,23 +151,26 @@ pub enum Message {
 // check ignored files and directories, returning true if
 // the current entry should be ignored
 pub fn ignored(entry: &DirEntry, config: &Config) -> bool {
-    if entry.metadata().unwrap().is_dir() {
-        for pat in config.ignore.path.clone() {
-            if Pattern::new(&pat)
-                .unwrap()
-                .matches(entry.path().to_str().unwrap())
-            {
-                return true;
-            }
+    for pat in config.ignore.path.clone() {
+        if Pattern::new(&pat)
+            .unwrap()
+            .matches(entry.path().to_str().unwrap())
+        {
+            return true;
         }
-    } else {
-        for pat in config.ignore.name.clone() {
-            if Pattern::new(&pat)
-                .unwrap()
-                .matches(entry.path().file_name().unwrap().to_str().unwrap())
-            {
-                return true;
-            }
+    }
+    if Pattern::new(".runison-*")
+        .unwrap()
+        .matches(entry.path().file_name().unwrap().to_str().unwrap())
+    {
+        return true;
+    }
+    for pat in config.ignore.name.clone() {
+        if Pattern::new(&pat)
+            .unwrap()
+            .matches(entry.path().file_name().unwrap().to_str().unwrap())
+        {
+            return true;
         }
     }
     false
@@ -217,20 +242,31 @@ impl Synchronizer {
             .into_iter()
             .filter_entry(|e| !ignored(e, &config.clone()))
         {
+            let root_path = PathBuf::from(&rp);
             match entry {
                 Ok(ent) => {
                     let config = self.config.clone();
+                    let fp: String;
 
-                    pb.set_message(ent.path().strip_prefix(&rp).unwrap().to_str().unwrap());
-                    self.entries.insert(
-                        ent.path()
+                    // if the path of the entry is the same as
+                    // the root path, the entry key will be "" unless
+                    // we specify it manually
+                    if ent.path().to_str().unwrap().to_string().len()
+                        == root_path.to_str().unwrap().to_string().len()
+                    {
+                        fp = root_path.to_str().unwrap().to_string();
+                    } else {
+                        fp = ent
+                            .path()
                             .strip_prefix(&rp)
                             .unwrap()
                             .to_str()
                             .unwrap()
-                            .to_string(),
-                        Node::from_path(&config.root.path, &config).unwrap(),
-                    );
+                            .to_string();
+                    }
+                    pb.set_message(&fp.clone());
+                    self.entries
+                        .insert(fp.clone(), Node::from_path(&fp, &config).unwrap());
                     pb.tick();
                 }
                 Err(_) => {}
@@ -245,6 +281,107 @@ impl Synchronizer {
         {
             let f = std::fs::File::create(archive).unwrap();
             bincode::serialize_into(f, &self.entries).unwrap();
+        }
+    }
+    pub fn local_changes(&mut self) -> Option<Vec<Change>> {
+        println!("Detecting changed files...");
+
+        let started = Instant::now();
+        let pb = ProgressBar::new_spinner();
+        pb.enable_steady_tick(200);
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .tick_chars("/|\\- ")
+                .template("{spinner:.dim.bold} found: {wide_msg}"),
+        );
+        let config = self.config.clone();
+        let rp = String::from(config.root.path.clone());
+
+        let mut archive = PathBuf::from(&rp);
+        archive.push(".runison-current");
+
+        let mut oldarchive = PathBuf::from(&rp);
+        oldarchive.push(".runison-previous");
+
+        let current = std::fs::File::open(archive).unwrap();
+        let reader = BufReader::new(current);
+
+        let ca: std::result::Result<BTreeMap<String, Node>, Box<bincode::ErrorKind>> =
+            bincode::deserialize_from(reader);
+        match ca {
+            Ok(current_archive) => {
+                let previous = std::fs::File::open(oldarchive).unwrap();
+                let preader = BufReader::new(previous);
+
+                let pa: std::result::Result<BTreeMap<String, Node>, Box<bincode::ErrorKind>> =
+                    bincode::deserialize_from(preader);
+
+                match pa {
+                    Ok(previous_archive) => {
+                        let mut changes = Vec::new();
+                        // first get deletions
+                        for (path, node) in &current_archive {
+                            if let Some(prev) = previous_archive.get(path) {
+                                // exists in both, check for change
+                                if !node.is_dir && node.modified != prev.modified {
+                                    // changed file
+
+                                    pb.set_message(node.name.clone().to_str().unwrap());
+                                    pb.tick();
+                                    changes.push(Change {
+                                        change_type: ChangeType::Modified,
+                                        node: node.clone(),
+                                    })
+                                }
+                            } else {
+                                // doesn't exist in previous, is new file
+
+                                pb.set_message(node.name.clone().to_str().unwrap());
+                                pb.tick();
+                                changes.push(Change {
+                                    change_type: ChangeType::Added,
+                                    node: node.clone(),
+                                })
+                            }
+                        }
+
+                        // then additions
+
+                        for (path, prev) in previous_archive {
+                            match &current_archive.get(&path) {
+                                Some(_) => {}
+                                None => {
+                                    // current file is deleted
+
+                                    pb.set_message(prev.name.clone().to_str().unwrap());
+                                    pb.tick();
+                                    changes.push(Change {
+                                        change_type: ChangeType::Deleted,
+                                        node: prev.clone(),
+                                    })
+                                }
+                            }
+                        }
+                        // then changes
+
+                        pb.finish_and_clear();
+
+                        println!(
+                            "Done scanning local changes in {}",
+                            HumanDuration(started.elapsed())
+                        );
+                        return Some(changes);
+                    }
+                    Err(e) => {
+                        println!("Error: {:?}", e);
+                        return None;
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Error: {:?}", e);
+                return None;
+            }
         }
     }
 }

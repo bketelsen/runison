@@ -77,6 +77,13 @@ impl Participant {
         // create index
         self.synchronizer.index();
 
+        if let Some(changes) = self.synchronizer.local_changes() {
+            println!("Got {:?} changes", changes.len());
+            for change in changes {
+                println!("{:#?} {:#?}", change.change_type, change.node.path);
+            }
+        }
+
         let message = Message::RegisterParticipant(self.name.clone(), self.public_addr);
         self.client.network.send(self.discovery_endpoint, message);
         loop {
