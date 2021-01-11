@@ -1,18 +1,10 @@
-use crate::common::Node;
+use crate::common::{Client, Event, Synchronizer};
+use crate::common::{Config, Message, Status};
 
-use super::common::{Config, Message, Status};
+use message_io::network::{Endpoint, NetEvent};
 
-use message_io::events::EventQueue;
-use message_io::network::{Endpoint, NetEvent, Network};
-
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::{collections::BTreeMap, collections::HashMap, path::PathBuf};
-
-use walkdir::{DirEntryExt, WalkDir};
-
-enum Event {
-    Network(NetEvent<Message>),
-}
 
 struct ParticipantInfo {
     addr: SocketAddr,
@@ -20,14 +12,12 @@ struct ParticipantInfo {
 }
 
 pub struct DiscoveryServer {
-    event_queue: EventQueue<Event>,
-    network: Network,
+    client: Client,
+    synchronizer: Synchronizer,
     participants: HashMap<String, ParticipantInfo>,
     status: Status,
     verbosity: u64,
     debug: bool,
-    config: Config,
-    entries: BTreeMap<String, Node>,
 }
 
 impl DiscoveryServer {
@@ -38,86 +28,38 @@ impl DiscoveryServer {
         listen: &str,
         port: &str,
     ) -> Option<DiscoveryServer> {
-        let mut event_queue = EventQueue::new();
-
-        let network_sender = event_queue.sender().clone();
-        let mut network =
-            Network::new(move |net_event| network_sender.send(Event::Network(net_event)));
-
-        let listen_addr = format!("{}:{}", &listen, &port);
-        match network.listen_tcp(&listen_addr) {
-            Ok(_) => {
-                println!("Discovery server running at {}", &listen_addr);
+        // create network client
+        if let Some(mut client) = Client::new(&listen, &port) {
+            match client.start() {
+                Ok(_) => println!("Started listener"),
+                Err(_) => return None,
+            };
+            // create synchronization service
+            if let Some(synchronizer) = Synchronizer::new(config) {
                 Some(DiscoveryServer {
-                    event_queue,
-                    network,
+                    client,
                     participants: HashMap::new(),
                     status: Status::Starting,
-                    verbosity: verbosity,
-                    debug: debug,
-                    config: config,
-                    entries: BTreeMap::new(),
+                    verbosity,
+                    debug,
+                    synchronizer,
                 })
-            }
-            Err(_) => {
-                println!("Can not listen on {}", listen_addr);
+            } else {
                 None
             }
+        } else {
+            None
         }
     }
 
     pub fn run(mut self) {
-        // Startup Preparation Things
-        if self.debug {
-            println!("[Preparing server...]");
-        };
-
-        if self.debug {
-            println!("[Root: {:?}]", self.config.root.path);
-        };
-
-        // Update Status to Indexing
+        // Update Status
         self.status = Status::Indexing;
 
-        let config = self.config.clone();
-        let rp = String::from(config.root.path.clone());
-        //  self.entries
-        //     .insert(".".to_string(), Node::from_path(&rp, &config).unwrap());
-        for entry in WalkDir::new(&rp)
-            .into_iter()
-            .filter_entry(|e| !crate::common::ignored(e, &config.clone()))
-        {
-            let config = self.config.clone();
-            let e = entry.unwrap().clone();
-            //println!("inode: {:?}", e.ino());
-            //println!("mtime: {:?}", e.metadata().unwrap().modified().unwrap());
-            let entry_path = e.path().clone().to_str().unwrap();
-            //println!("path: {:?}", entry_path);
-            self.entries.insert(
-                e.clone()
-                    .path()
-                    .strip_prefix(&rp)
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_string(),
-                Node::from_path(entry_path, &config).unwrap(),
-            );
-        }
-        let mut archive = PathBuf::from(&rp);
-        archive.push(".runison-before");
-        println!("{:?}", archive.display());
-        {
-            let f = std::fs::File::create(archive).unwrap();
-            bincode::serialize_into(f, &self.entries).unwrap();
-        }
-        println!("{:?}", self.entries.len());
-        // debug iterate over everything.
-        for (key, _) in &self.entries {
-            println!("{}: ", key);
-        }
+        // create index
+        self.synchronizer.index();
         loop {
-            match self.event_queue.receive() {
+            match self.client.event_queue.receive() {
                 Event::Network(net_event) => match net_event {
                     NetEvent::Message(endpoint, message) => match message {
                         Message::RegisterParticipant(name, addr) => {
@@ -137,7 +79,8 @@ impl DiscoveryServer {
                             if self.debug {
                                 println!("[Get Status: {:?}]", endpoint)
                             };
-                            self.network
+                            self.client
+                                .network
                                 .send(endpoint, Message::ServerStatus(self.status));
                         }
                         Message::GetNodes() => {
@@ -145,8 +88,10 @@ impl DiscoveryServer {
                                 println!("[GetNodes: {:?}]", endpoint)
                             };
 
-                            self.network
-                                .send(endpoint, Message::NodeList(self.entries.clone()));
+                            self.client.network.send(
+                                endpoint,
+                                Message::NodeList(self.synchronizer.entries.clone()),
+                            );
                         }
                         _ => unreachable!(),
                     },
@@ -181,12 +126,14 @@ impl DiscoveryServer {
                 .map(|(name, info)| (name.clone(), info.addr))
                 .collect();
 
-            self.network.send(endpoint, Message::ParticipantList(list));
+            self.client
+                .network
+                .send(endpoint, Message::ParticipantList(list));
 
             // Notify other participants about this new participant
             let endpoints = self.participants.values().map(|info| &info.endpoint);
             let message = Message::ParticipantNotificationAdded(name.to_string(), addr);
-            self.network.send_all(endpoints, message);
+            self.client.network.send_all(endpoints, message);
 
             // Register participant
             self.participants
@@ -205,7 +152,7 @@ impl DiscoveryServer {
             // Notify other participants about this removed participant
             let endpoints = self.participants.values().map(|info| &info.endpoint);
             let message = Message::ParticipantNotificationRemoved(name.to_string());
-            self.network.send_all(endpoints, message);
+            self.client.network.send_all(endpoints, message);
             println!("Removed participant '{}' with ip {}", name, info.addr);
         } else {
             println!(

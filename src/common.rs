@@ -9,9 +9,13 @@ use walkdir::{DirEntry, WalkDir};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::fs::File;
+use std::io;
 use std::net::SocketAddr;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
+
+use message_io::events::EventQueue;
+use message_io::network::{Endpoint, NetEvent, Network};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 
@@ -151,4 +155,112 @@ pub fn ignored(entry: &DirEntry, config: &Config) -> bool {
         }
     }
     false
+}
+/*
+pub struct DiscoveryServer {
+   X event_queue: EventQueue<Event>,
+   X network: Network,
+    participants: HashMap<String, ParticipantInfo>,
+    status: Status,
+    verbosity: u64,
+    debug: bool,
+  X  config: Config,
+  X  entries: BTreeMap<String, Node>,
+}
+pub struct Participant {
+  X  event_queue: EventQueue<Event>,
+  X  network: Network,
+    name: String,
+    debug: bool,
+    status: Status,
+    discovery_endpoint: Endpoint,
+    public_addr: SocketAddr,
+    known_participants: HashMap<String, Endpoint>, // Used only for free resources later
+  X  entries: BTreeMap<String, Node>,
+  X  config: Config,
+}
+*/
+
+pub struct Synchronizer {
+    pub entries: BTreeMap<String, Node>,
+    config: Config,
+}
+impl Synchronizer {
+    pub fn new(config: Config) -> Option<Synchronizer> {
+        Some(Synchronizer {
+            entries: BTreeMap::new(),
+            config,
+        })
+    }
+    pub fn index(&mut self) {
+        let config = self.config.clone();
+        let rp = String::from(config.root.path.clone());
+        //    self.entries
+        //       .insert(".".to_string(), Node::from_path(&rp, &config).unwrap());
+        for entry in WalkDir::new(&rp)
+            .into_iter()
+            .filter_entry(|e| !crate::common::ignored(e, &config.clone()))
+        {
+            let config = self.config.clone();
+            self.entries.insert(
+                entry
+                    .unwrap()
+                    .path()
+                    .strip_prefix(&rp)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
+                Node::from_path(&config.root.path, &config).unwrap(),
+            );
+        }
+        let mut archive = PathBuf::from(&rp);
+        archive.push(".runison-current");
+        println!("{:?}", archive.display());
+        {
+            let f = std::fs::File::create(archive).unwrap();
+            bincode::serialize_into(f, &self.entries).unwrap();
+        }
+    }
+}
+pub enum Event {
+    Network(NetEvent<Message>),
+}
+
+// Client encapsulates the network activity
+pub struct Client {
+    pub event_queue: EventQueue<Event>,
+    pub network: Network,
+    listen: String,
+    port: String,
+    listen_addr: String,
+}
+impl Client {
+    pub fn new(listen: &str, port: &str) -> Option<Client> {
+        let mut event_queue = EventQueue::new();
+
+        let network_sender = event_queue.sender().clone();
+        let network = Network::new(move |net_event| network_sender.send(Event::Network(net_event)));
+
+        let listen_addr = format!("{}:{}", &listen, &port);
+        Some(Client {
+            event_queue,
+            network,
+            listen: listen.to_string(),
+            port: port.to_string(),
+            listen_addr,
+        })
+    }
+    // Server
+    pub fn start(&mut self) -> io::Result<(usize, SocketAddr)> {
+        self.network.listen_tcp(&self.listen_addr)
+    }
+    // Client
+    pub fn connect(&mut self, target: &str) -> io::Result<Endpoint> {
+        self.network.connect_tcp(target)
+    }
+    // Client Gossip
+    pub fn gossip(&mut self) -> io::Result<(usize, SocketAddr)> {
+        self.network.listen_udp(&self.listen_addr)
+    }
 }
