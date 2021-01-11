@@ -1,0 +1,18 @@
+[root]
+path = "/Users/bjk/src"
+
+[path]
+directories = [
+    "src",
+    "dotfiles"
+]
+[ignore]
+name = [
+    "*~",
+    ".*~"
+]
+path = [
+    "*node_modules*",
+    "*target*"
+
+]
