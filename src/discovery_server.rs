@@ -6,7 +6,7 @@ use message_io::events::EventQueue;
 use message_io::network::{Endpoint, NetEvent, Network};
 
 use std::net::SocketAddr;
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::BTreeMap, collections::HashMap, path::PathBuf};
 
 use walkdir::{DirEntryExt, WalkDir};
 
@@ -27,7 +27,7 @@ pub struct DiscoveryServer {
     verbosity: u64,
     debug: bool,
     config: Config,
-    entries: HashMap<String, Node>,
+    entries: BTreeMap<String, Node>,
 }
 
 impl DiscoveryServer {
@@ -56,7 +56,7 @@ impl DiscoveryServer {
                     verbosity: verbosity,
                     debug: debug,
                     config: config,
-                    entries: HashMap::new(),
+                    entries: BTreeMap::new(),
                 })
             }
             Err(_) => {

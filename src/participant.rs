@@ -4,7 +4,7 @@ use message_io::events::EventQueue;
 use message_io::network::{Endpoint, NetEvent, Network};
 
 use bincode;
-use std::net::SocketAddr;
+use std::{collections::BTreeMap, net::SocketAddr};
 use std::{collections::HashMap, path::PathBuf};
 use walkdir::WalkDir;
 enum Event {
@@ -19,7 +19,7 @@ pub struct Participant {
     discovery_endpoint: Endpoint,
     public_addr: SocketAddr,
     known_participants: HashMap<String, Endpoint>, // Used only for free resources later
-    entries: HashMap<String, Node>,
+    entries: BTreeMap<String, Node>,
     config: Config,
 }
 
@@ -53,7 +53,7 @@ impl Participant {
                     discovery_endpoint: endpoint,
                     public_addr: addr,
                     known_participants: HashMap::new(),
-                    entries: HashMap::new(),
+                    entries: BTreeMap::new(),
                 })
             } else {
                 println!("Can not connect to the discovery server at {}", target);
@@ -171,7 +171,7 @@ impl Participant {
             }
         }
     }
-    fn reconcile(&mut self, other: HashMap<String, Node>) {
+    fn reconcile(&mut self, other: BTreeMap<String, Node>) {
         for (key, _) in other {
             println!("{}: ", key);
             let mine = self.entries.get(&key);

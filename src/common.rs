@@ -3,7 +3,7 @@ use figment::{
     Error, Figment,
 };
 use glob::Pattern;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use walkdir::{DirEntry, WalkDir};
 
 use serde::{Deserialize, Serialize};
@@ -111,11 +111,14 @@ pub enum Message {
     ParticipantNotificationAdded(String, SocketAddr),
     ParticipantNotificationRemoved(String),
     ServerStatus(Status),
-    NodeList(HashMap<String, Node>),
+    NodeList(BTreeMap<String, Node>),
 
     // From Participant to Participant
     Greetings(String, String), //name and grettings
 }
+
+// check ignored files and directories, returning true if
+// the current entry should be ignored
 pub fn ignored(entry: &DirEntry, config: &Config) -> bool {
     if entry.metadata().unwrap().is_dir() {
         for pat in config.ignore.path.clone() {
