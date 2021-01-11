@@ -2,9 +2,20 @@ use crate::common::{Client, Event, Node, Synchronizer};
 use crate::common::{Config, Message, Status};
 
 use message_io::network::{Endpoint, NetEvent};
+use std::thread;
 
+use console::Term;
+use console::{style, Emoji};
+use indicatif::{HumanDuration, MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, net::SocketAddr};
+
+static LOOKING_GLASS: Emoji<'_, '_> = Emoji("🔍  ", "");
+static TRUCK: Emoji<'_, '_> = Emoji("🚚  ", "");
+static CLIP: Emoji<'_, '_> = Emoji("🔗  ", "");
+static PAPER: Emoji<'_, '_> = Emoji("📃  ", "");
+static SPARKLE: Emoji<'_, '_> = Emoji("✨ ", ":-)");
 
 pub struct Participant {
     client: Client,
@@ -15,6 +26,7 @@ pub struct Participant {
     discovery_endpoint: Endpoint,
     public_addr: SocketAddr,
     known_participants: HashMap<String, Endpoint>, // Used only for free resources later
+    term: Term,
 }
 
 impl Participant {
@@ -31,7 +43,6 @@ impl Participant {
         if let Some(mut client) = Client::new(&listen, &port) {
             match client.gossip() {
                 Ok((_, public_addr)) => {
-                    println!("Started Gossip listener");
                     // create synchronization service
                     if let Some(synchronizer) = Synchronizer::new(config) {
                         match client.connect(target) {
@@ -44,6 +55,7 @@ impl Participant {
                                 discovery_endpoint: endpoint,
                                 public_addr,
                                 known_participants: HashMap::new(),
+                                term: Term::stdout(),
                             }),
                             Err(_) => None,
                         }

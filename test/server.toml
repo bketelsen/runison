@@ -1,5 +1,5 @@
 [root]
-path = "/Users/bjk/src"
+path = "/Users/bjk/src/github.com/bketelsen/runison/test/root1"
 
 [path]
 directories = [

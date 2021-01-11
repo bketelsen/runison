@@ -4,8 +4,12 @@ use figment::{
 };
 use glob::Pattern;
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::time::Instant;
 use walkdir::{DirEntry, WalkDir};
 
+use indicatif::{HumanDuration, ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::fs::File;
@@ -131,11 +135,6 @@ pub fn ignored(entry: &DirEntry, config: &Config) -> bool {
                 .unwrap()
                 .matches(entry.path().to_str().unwrap())
             {
-                println!(
-                    "Matched skip rule {:?} for {:?}",
-                    &pat,
-                    entry.path().to_str().unwrap()
-                );
                 return true;
             }
         }
@@ -145,11 +144,6 @@ pub fn ignored(entry: &DirEntry, config: &Config) -> bool {
                 .unwrap()
                 .matches(entry.path().file_name().unwrap().to_str().unwrap())
             {
-                println!(
-                    "Matched skip rule {:?} for {:?}",
-                    &pat,
-                    entry.path().file_name().unwrap().to_str().unwrap()
-                );
                 return true;
             }
         }
@@ -192,28 +186,59 @@ impl Synchronizer {
             config,
         })
     }
+    fn move_index(&mut self) {
+        let config = self.config.clone();
+        let rp = String::from(config.root.path.clone());
+
+        let mut archive = PathBuf::from(&rp);
+        archive.push(".runison-current");
+
+        let mut newarchive = PathBuf::from(&rp);
+        newarchive.push(".runison-previous");
+        println!("Moving index to {:?}", newarchive.display());
+        fs::rename(archive, newarchive); // Rename a.txt to b.txt
+    }
     pub fn index(&mut self) {
+        let started = Instant::now();
+        self.move_index();
+        println!("Indexing files...");
+        let pb = ProgressBar::new_spinner();
+        pb.enable_steady_tick(200);
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .tick_chars("/|\\- ")
+                .template("{spinner:.dim.bold} indexing: {wide_msg}"),
+        );
         let config = self.config.clone();
         let rp = String::from(config.root.path.clone());
         //    self.entries
         //       .insert(".".to_string(), Node::from_path(&rp, &config).unwrap());
         for entry in WalkDir::new(&rp)
             .into_iter()
-            .filter_entry(|e| !crate::common::ignored(e, &config.clone()))
+            .filter_entry(|e| !ignored(e, &config.clone()))
         {
-            let config = self.config.clone();
-            self.entries.insert(
-                entry
-                    .unwrap()
-                    .path()
-                    .strip_prefix(&rp)
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_string(),
-                Node::from_path(&config.root.path, &config).unwrap(),
-            );
+            match entry {
+                Ok(ent) => {
+                    let config = self.config.clone();
+
+                    pb.set_message(ent.path().strip_prefix(&rp).unwrap().to_str().unwrap());
+                    self.entries.insert(
+                        ent.path()
+                            .strip_prefix(&rp)
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                            .to_string(),
+                        Node::from_path(&config.root.path, &config).unwrap(),
+                    );
+                    pb.tick();
+                }
+                Err(_) => {}
+            }
         }
+        pb.finish_and_clear();
+        println!("Done indexing in {}", HumanDuration(started.elapsed()));
+
         let mut archive = PathBuf::from(&rp);
         archive.push(".runison-current");
         println!("{:?}", archive.display());
