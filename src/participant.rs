@@ -1,15 +1,19 @@
-use crate::common::{Client, Event, Node, Synchronizer};
-use crate::common::{Config, Message, Status};
+use crate::synchronizer::Synchronizer;
+use crate::{client::Client, synchronizer::Status};
+use crate::{client::Event, common::Message};
+use crate::{config::Config, node::Node};
 
 use message_io::network::{Endpoint, NetEvent};
-use std::thread;
+
+use std::collections::HashMap;
+use std::net::SocketAddr;
 
 use console::Term;
 use console::{style, Emoji};
 use indicatif::{HumanDuration, MultiProgress, ProgressBar, ProgressStyle};
-use std::collections::HashMap;
+
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
-use std::{collections::BTreeMap, net::SocketAddr};
 
 static LOOKING_GLASS: Emoji<'_, '_> = Emoji("🔍  ", "");
 static TRUCK: Emoji<'_, '_> = Emoji("🚚  ", "");

@@ -1,5 +1,7 @@
-use crate::common::{Client, Event, Synchronizer};
-use crate::common::{Config, Message, Status};
+use crate::config::Config;
+use crate::synchronizer::Synchronizer;
+use crate::{client::Client, synchronizer::Status};
+use crate::{client::Event, common::Message};
 
 use message_io::network::{Endpoint, NetEvent};
 

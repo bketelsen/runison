@@ -1,6 +1,10 @@
+mod client;
 mod common;
+mod config;
 mod discovery_server;
+mod node;
 mod participant;
+mod synchronizer;
 
 extern crate clap;
 use clap::{App, Arg, SubCommand};
@@ -79,7 +83,7 @@ fn main() {
     if let Some(ref matches) = matches.subcommand_matches("server") {
         let listen = matches.value_of("listen").unwrap();
         let port = matches.value_of("port").unwrap();
-        let result = common::get_config(config);
+        let result = config::get_config(config);
         match result {
             Ok(config) => {
                 match discovery_server::DiscoveryServer::new(config, verbosity, debug, listen, port)
@@ -95,7 +99,7 @@ fn main() {
             let target = matches.value_of("target").unwrap();
             let name = matches.value_of("name").unwrap();
 
-            let result = common::get_config(config);
+            let result = config::get_config(config);
             match result {
                 Ok(config) => {
                     match participant::Participant::new(config, name, target, debug, verbosity) {
