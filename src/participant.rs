@@ -156,7 +156,10 @@ impl Participant {
 
                         Message::Changeset(changes) => {
                             for change in changes {
-                                println!("{:#?}:{:#?}", change.change_type, change.node.path);
+                                println!(
+                                    "{:#?}:{:#?}",
+                                    change.change_type, change.node.relative_path
+                                );
                             }
                         }
                         _ => unreachable!(),

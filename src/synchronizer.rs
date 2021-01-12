@@ -11,7 +11,10 @@ use indicatif::{HumanDuration, ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use walkdir::{DirEntry, WalkDir};
 
-use crate::{config::Config, node::Node};
+use crate::{
+    config::{Config, Path},
+    node::Node,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Clone)]
 // Operational status of the process
@@ -23,11 +26,11 @@ pub enum Status {
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Clone)]
 pub enum ChangeType {
-    Added,
-    Modified,
-    Deleted,
+    Add,
+    Modify,
+    Delete,
 }
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
 
 pub struct Change {
     pub change_type: ChangeType,
@@ -92,7 +95,7 @@ impl Synchronizer {
                 Ok(ent) => {
                     let config = self.config.clone();
                     let fp: String;
-
+                    println!("{:#?}", ent.path());
                     // if the path of the entry is the same as
                     // the root path, the entry key will be "" unless
                     // we specify it manually
@@ -110,8 +113,10 @@ impl Synchronizer {
                             .to_string();
                     }
                     pb.set_message(&fp.clone());
-                    self.entries
-                        .insert(fp.clone(), Node::from_path(&fp, &config).unwrap());
+                    self.entries.insert(
+                        fp.clone(),
+                        Node::from_path(PathBuf::from(&rp), PathBuf::from(&fp), &config).unwrap(),
+                    );
                     pb.tick();
                 }
                 Err(_) => {}
@@ -139,14 +144,14 @@ impl Synchronizer {
                 if !node.is_dir && node.modified != remote.modified {
                     // changed file
                     changes.push(Change {
-                        change_type: ChangeType::Modified,
+                        change_type: ChangeType::Modify,
                         node: node.clone(),
                     })
                 }
             } else {
                 // doesn't exist in previous, is new file
                 changes.push(Change {
-                    change_type: ChangeType::Added,
+                    change_type: ChangeType::Add,
                     node: node.clone(),
                 })
             }
@@ -158,7 +163,7 @@ impl Synchronizer {
                     // current file is deleted
 
                     changes.push(Change {
-                        change_type: ChangeType::Deleted,
+                        change_type: ChangeType::Delete,
                         node: local.clone(),
                     })
                 }
@@ -220,7 +225,7 @@ impl Synchronizer {
                                     pb.set_message(node.name.clone().to_str().unwrap());
                                     pb.tick();
                                     changes.push(Change {
-                                        change_type: ChangeType::Modified,
+                                        change_type: ChangeType::Modify,
                                         node: node.clone(),
                                     })
                                 }
@@ -229,7 +234,7 @@ impl Synchronizer {
                                 pb.set_message(node.name.clone().to_str().unwrap());
                                 pb.tick();
                                 changes.push(Change {
-                                    change_type: ChangeType::Added,
+                                    change_type: ChangeType::Add,
                                     node: node.clone(),
                                 })
                             }
@@ -243,7 +248,7 @@ impl Synchronizer {
                                     pb.set_message(prev.name.clone().to_str().unwrap());
                                     pb.tick();
                                     changes.push(Change {
-                                        change_type: ChangeType::Deleted,
+                                        change_type: ChangeType::Delete,
                                         node: prev.clone(),
                                     })
                                 }
