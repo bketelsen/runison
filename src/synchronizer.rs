@@ -26,9 +26,12 @@ pub enum Status {
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Clone)]
 pub enum ChangeType {
-    Add,
-    Modify,
-    Delete,
+    LocalAdd,
+    LocalModify,
+    LocalDelete,
+    RemoteAdd,
+    RemoteModify,
+    RemoteDelete,
 }
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 
@@ -39,7 +42,7 @@ pub struct Change {
 
 pub struct Synchronizer {
     pub entries: BTreeMap<String, Node>,
-    config: Config,
+    pub config: Config,
     pub first_run: bool,
 }
 impl Synchronizer {
@@ -95,14 +98,13 @@ impl Synchronizer {
                 Ok(ent) => {
                     let config = self.config.clone();
                     let fp: String;
-                    println!("{:#?}", ent.path());
                     // if the path of the entry is the same as
                     // the root path, the entry key will be "" unless
                     // we specify it manually
                     if ent.path().to_str().unwrap().to_string().len()
                         == root_path.to_str().unwrap().to_string().len()
                     {
-                        fp = root_path.to_str().unwrap().to_string();
+                        fp = String::from(".");
                     } else {
                         fp = ent
                             .path()
@@ -127,44 +129,44 @@ impl Synchronizer {
 
         let mut archive = PathBuf::from(&rp);
         archive.push(".runison-current");
-        println!("{:?}", archive.display());
         {
             let f = std::fs::File::create(archive).unwrap();
             bincode::serialize_into(f, &self.entries).unwrap();
         }
     }
-    pub fn remote_changes(&mut self, tree: BTreeMap<String, Node>) -> Option<Vec<Change>> {
+    pub fn remote_changes(&mut self, remote_tree: BTreeMap<String, Node>) -> Option<Vec<Change>> {
         println!("Detecting file changeset...");
 
         let started = Instant::now();
         let mut changes = Vec::new();
         for (path, node) in &self.entries {
-            if let Some(remote) = tree.get(path) {
+            if let Some(remote) = remote_tree.get(path) {
                 // exists in both, check for change
                 if !node.is_dir && node.modified != remote.modified {
                     // changed file
-                    changes.push(Change {
-                        change_type: ChangeType::Modify,
-                        node: node.clone(),
-                    })
+                    if node.modified > remote.modified {
+                        changes.push(Change {
+                            change_type: ChangeType::LocalModify,
+                            node: node.clone(),
+                        })
+                    }
                 }
             } else {
-                // doesn't exist in previous, is new file
+                // doesn't exist locally, is new file
                 changes.push(Change {
-                    change_type: ChangeType::Add,
+                    change_type: ChangeType::LocalAdd,
                     node: node.clone(),
                 })
             }
         }
-        for (path, local) in tree {
+        for (path, remote) in remote_tree {
             match self.entries.get(&path) {
                 Some(_) => {}
                 None => {
-                    // current file is deleted
-
+                    // remote file doesn't exist locally
                     changes.push(Change {
-                        change_type: ChangeType::Delete,
-                        node: local.clone(),
+                        change_type: ChangeType::RemoteAdd,
+                        node: remote.clone(),
                     })
                 }
             }
@@ -225,7 +227,7 @@ impl Synchronizer {
                                     pb.set_message(node.name.clone().to_str().unwrap());
                                     pb.tick();
                                     changes.push(Change {
-                                        change_type: ChangeType::Modify,
+                                        change_type: ChangeType::LocalModify,
                                         node: node.clone(),
                                     })
                                 }
@@ -234,7 +236,7 @@ impl Synchronizer {
                                 pb.set_message(node.name.clone().to_str().unwrap());
                                 pb.tick();
                                 changes.push(Change {
-                                    change_type: ChangeType::Add,
+                                    change_type: ChangeType::LocalAdd,
                                     node: node.clone(),
                                 })
                             }
@@ -248,7 +250,7 @@ impl Synchronizer {
                                     pb.set_message(prev.name.clone().to_str().unwrap());
                                     pb.tick();
                                     changes.push(Change {
-                                        change_type: ChangeType::Delete,
+                                        change_type: ChangeType::LocalDelete,
                                         node: prev.clone(),
                                     })
                                 }

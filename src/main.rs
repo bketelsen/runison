@@ -73,10 +73,9 @@ fn main() {
         .get_matches();
 
     let config = matches.value_of("config").unwrap_or("default.conf");
-    println!("[config: {}]", config);
+    println!("Using config: {}", config);
     let debug = matches.is_present("debug");
 
-    println!("[debug: {}]", debug);
     let verbosity = matches.occurrences_of("v");
 
     // You can check if a subcommand was used like normal

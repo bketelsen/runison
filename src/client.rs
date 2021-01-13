@@ -10,6 +10,7 @@ use crate::common::Message;
 
 pub enum Event {
     Network(NetEvent<Message>),
+    SendChunk(Endpoint, String),
 }
 
 // Client encapsulates the network activity

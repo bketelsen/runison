@@ -1,6 +1,6 @@
 use crate::synchronizer::Synchronizer;
 use crate::{client::Client, synchronizer::Status};
-use crate::{client::Event, common::Message};
+use crate::{client::Event, common::Message, common::Transfer};
 use crate::{config::Config, node::Node};
 
 use message_io::network::{Endpoint, NetEvent};
@@ -75,6 +75,10 @@ impl Participant {
     }
 
     pub fn run(mut self) {
+        const CHUNK_SIZE: usize = 65536;
+
+        // transfers are files being received from the other network peer
+        let mut transfers: HashMap<Endpoint, Transfer> = HashMap::new();
         // Update Status
         self.status = Status::Indexing;
 
@@ -86,7 +90,7 @@ impl Participant {
         // need logic/state here to determine what to do.
 
         if let Some(changes) = self.synchronizer.local_changes() {
-            println!("Got {:?} changes", changes.len());
+            println!("Got {:?} local changes", changes.len());
             for change in changes {
                 println!("{:#?} {:#?}", change.change_type, change.node.path);
             }
@@ -157,9 +161,15 @@ impl Participant {
                         Message::Changeset(changes) => {
                             for change in changes {
                                 println!(
-                                    "{:#?}:{:#?}",
-                                    change.change_type, change.node.relative_path
+                                    "Requesting {:#?}:{:#?}:{:#?}",
+                                    change.change_type,
+                                    change.node.is_dir,
+                                    change.node.relative_path
                                 );
+                                let message = Message::SendMe(String::from(
+                                    change.node.relative_path.to_str().unwrap(),
+                                ));
+                                self.client.network.send(self.discovery_endpoint, message);
                             }
                         }
                         _ => unreachable!(),
@@ -172,6 +182,7 @@ impl Participant {
                     }
                     NetEvent::DeserializationError(_) => (),
                 },
+                Event::SendChunk(_, _) => {}
             }
         }
     }

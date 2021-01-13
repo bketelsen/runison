@@ -48,13 +48,15 @@ impl Node {
         let config = config.clone();
         // get the metadata of the file
         // TODO: handle error for bad symlinks
-
         let mut joined = PathBuf::new();
         for p in root_path.iter() {
             joined.push(p);
         }
-        for p in path.iter() {
-            joined.push(p);
+
+        if path.to_str() != Some(".") {
+            for p in path.iter() {
+                joined.push(p);
+            }
         }
         let metadata = std::fs::metadata(&joined).unwrap();
         let inode = metadata.ino();
@@ -64,7 +66,7 @@ impl Node {
             is_dir: filetype.is_dir(),
             is_file: filetype.is_file(),
             is_symlink: filetype.is_symlink(),
-            name: PathBuf::from(&path).file_name().unwrap().to_os_string(),
+            name: path.clone().into_os_string(),
             path: joined,
             relative_path: path,
             len: metadata.len(),
