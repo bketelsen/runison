@@ -3,7 +3,6 @@ use figment::{
     Error, Figment,
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 #[derive(Clone, PartialEq, Deserialize)]
 pub struct Config {
@@ -28,6 +27,6 @@ pub struct Ignore {
     pub path: Vec<String>,
 }
 
-pub fn get_config(path: PathBuf) -> Result<Config, figment::Error> {
+pub fn get_config(path: &str) -> Result<Config, figment::Error> {
     Figment::new().merge(Toml::file(path)).extract()
 }

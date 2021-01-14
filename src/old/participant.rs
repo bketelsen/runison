@@ -1,7 +1,7 @@
 use crate::synchronizer::Synchronizer;
-use crate::{client::Client, synchronizer::Status};
-use crate::{client::Event, common::Message, common::Transfer};
+use crate::{common::Message, common::Transfer, netclient::Event};
 use crate::{config::Config, node::Node};
+use crate::{netclient::Client, synchronizer::Status};
 
 use message_io::network::{Endpoint, NetEvent};
 

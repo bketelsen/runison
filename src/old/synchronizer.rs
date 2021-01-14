@@ -1,18 +1,21 @@
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     fs,
     io::{self, BufReader},
     path::PathBuf,
     time::Instant,
 };
 
-use crate::config::{Config, Path};
 use glob::Pattern;
 use indicatif::{HumanDuration, ProgressBar, ProgressStyle};
-
-use crate::runison::*;
 use serde::{Deserialize, Serialize};
 use walkdir::{DirEntry, WalkDir};
+
+use crate::{
+    config::{Config, Path},
+    node::Node,
+};
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Clone)]
 // Operational status of the process
 pub enum Status {
@@ -21,18 +24,31 @@ pub enum Status {
     Running,
     Stopping,
 }
+#[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Clone)]
+pub enum ChangeType {
+    LocalAdd,
+    LocalModify,
+    LocalDelete,
+    RemoteAdd,
+    RemoteModify,
+    RemoteDelete,
+}
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
+
+pub struct Change {
+    pub change_type: ChangeType,
+    pub node: Node,
+}
 
 pub struct Synchronizer {
-    pub entries: Entries,
+    pub entries: BTreeMap<String, Node>,
     pub config: Config,
     pub first_run: bool,
 }
 impl Synchronizer {
     pub fn new(config: Config) -> Option<Synchronizer> {
         Some(Synchronizer {
-            entries: Entries {
-                nodes: HashMap::new(),
-            },
+            entries: BTreeMap::new(),
             config,
             first_run: false,
         })
@@ -99,7 +115,7 @@ impl Synchronizer {
                             .to_string();
                     }
                     pb.set_message(&fp.clone());
-                    self.entries.nodes.insert(
+                    self.entries.insert(
                         fp.clone(),
                         Node::from_path(PathBuf::from(&rp), PathBuf::from(&fp), &config).unwrap(),
                     );
@@ -110,48 +126,47 @@ impl Synchronizer {
         }
         pb.finish_and_clear();
         println!("Done indexing in {}", HumanDuration(started.elapsed()));
-        /*
+
         let mut archive = PathBuf::from(&rp);
         archive.push(".runison-current");
         {
             let f = std::fs::File::create(archive).unwrap();
             bincode::serialize_into(f, &self.entries).unwrap();
         }
-        */
     }
-    pub fn remote_changes(self, remote_tree: Entries) -> Option<Vec<Change>> {
+    pub fn remote_changes(&mut self, remote_tree: BTreeMap<String, Node>) -> Option<Vec<Change>> {
         println!("Detecting file changeset...");
 
         let started = Instant::now();
         let mut changes = Vec::new();
-        for (path, node) in &self.entries.nodes {
-            if let Some(remote) = remote_tree.nodes.get(path) {
+        for (path, node) in &self.entries {
+            if let Some(remote) = remote_tree.get(path) {
                 // exists in both, check for change
-                if !node.dir && node.mod_seconds != remote.mod_seconds {
+                if !node.is_dir && node.modified != remote.modified {
                     // changed file
-                    if node.mod_seconds > remote.mod_seconds {
+                    if node.modified > remote.modified {
                         changes.push(Change {
-                            change_type: ChangeType::Clientmodify as i32,
-                            node: Some(node.clone()),
+                            change_type: ChangeType::LocalModify,
+                            node: node.clone(),
                         })
                     }
                 }
             } else {
                 // doesn't exist locally, is new file
                 changes.push(Change {
-                    change_type: ChangeType::Clientadd as i32,
-                    node: Some(node.clone()),
+                    change_type: ChangeType::LocalAdd,
+                    node: node.clone(),
                 })
             }
         }
-        for (path, remote) in remote_tree.nodes {
-            match self.entries.nodes.get(&path) {
+        for (path, remote) in remote_tree {
+            match self.entries.get(&path) {
                 Some(_) => {}
                 None => {
                     // remote file doesn't exist locally
                     changes.push(Change {
-                        change_type: ChangeType::Serveradd as i32,
-                        node: Some(remote.clone()),
+                        change_type: ChangeType::RemoteAdd,
+                        node: remote.clone(),
                     })
                 }
             }
@@ -193,14 +208,13 @@ impl Synchronizer {
         let current = std::fs::File::open(archive).unwrap();
         let reader = BufReader::new(current);
 
-        /*
-        let ca: std::result::Result<HashMap<String, Node>, Box<bincode::ErrorKind>> =
+        let ca: std::result::Result<BTreeMap<String, Node>, Box<bincode::ErrorKind>> =
             bincode::deserialize_from(reader);
         match ca {
             Ok(current_archive) => {
                 let previous = std::fs::File::open(oldarchive).unwrap();
                 let preader = BufReader::new(previous);
-                let pa: std::result::Result<HashMap<String, Node>, Box<bincode::ErrorKind>> =
+                let pa: std::result::Result<BTreeMap<String, Node>, Box<bincode::ErrorKind>> =
                     bincode::deserialize_from(preader);
                 match pa {
                     Ok(previous_archive) => {
@@ -208,22 +222,22 @@ impl Synchronizer {
                         for (path, node) in &current_archive {
                             if let Some(prev) = previous_archive.get(path) {
                                 // exists in both, check for change
-                                if !node.dir && node.modified != prev.modified {
+                                if !node.is_dir && node.modified != prev.modified {
                                     // changed file
                                     pb.set_message(node.name.clone().to_str().unwrap());
                                     pb.tick();
                                     changes.push(Change {
-                                        change_type: ChangeType::Clientmodify as i32,
-                                        node: Some(node.clone()),
+                                        change_type: ChangeType::LocalModify,
+                                        node: node.clone(),
                                     })
                                 }
                             } else {
                                 // doesn't exist in previous, is new file
-                                pb.set_message(node.name.clone().as_str());
+                                pb.set_message(node.name.clone().to_str().unwrap());
                                 pb.tick();
                                 changes.push(Change {
-                                    change_type: ChangeType::Clientadd as i32,
-                                    node: Some(node.clone()),
+                                    change_type: ChangeType::LocalAdd,
+                                    node: node.clone(),
                                 })
                             }
                         }
@@ -233,12 +247,11 @@ impl Synchronizer {
                                 None => {
                                     // current file is deleted
 
-                                    pb.set_message(prev.name.clone().as_str());
+                                    pb.set_message(prev.name.clone().to_str().unwrap());
                                     pb.tick();
-
                                     changes.push(Change {
-                                        change_type: ChangeType::Clientdelete as i32,
-                                        node: Some(prev.clone()),
+                                        change_type: ChangeType::LocalDelete,
+                                        node: prev.clone(),
                                     })
                                 }
                             }
@@ -262,8 +275,6 @@ impl Synchronizer {
                 return None;
             }
         }
-         */
-        None
     }
 }
 

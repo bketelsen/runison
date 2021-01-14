@@ -1,52 +1,64 @@
-use crate::config::Config;
-use crate::node::Node;
-use message_io::events::EventQueue;
-use message_io::network::{Endpoint, NetEvent, Network};
-use serde::{Deserialize, Serialize};
-use std::io;
-use std::net::SocketAddr;
+mod config;
+mod node;
+mod synchronizer;
 
-use crate::common::Message;
+use synchronizer::Synchronizer;
+use tonic::Request;
 
-pub enum Event {
-    Network(NetEvent<Message>),
-    SendChunk(Endpoint, String),
+use runison::synchronizer_client::SynchronizerClient;
+use runison::{ChangeSetResponse, Entries, Feature, Point, Rectangle, RouteNote, RouteSummary};
+
+pub mod runison {
+    tonic::include_proto!("runison");
 }
 
-// Client encapsulates the network activity
-pub struct Client {
-    pub event_queue: EventQueue<Event>,
-    pub network: Network,
-    listen: String,
-    port: String,
-    listen_addr: String,
+use std::path::PathBuf;
+use structopt::StructOpt;
+
+#[derive(Debug, StructOpt)]
+#[structopt(name = "runison", about = "A modern file synchronization tool.")]
+struct Opt {
+    /// Activate debug mode
+    // short and long flags (-d, --debug) will be deduced from the field's name
+    #[structopt(short, long)]
+    debug: bool,
+
+    /// Synchronization server
+    // we don't want to name it "speed", need to look smart
+    #[structopt(short = "s", long = "server")]
+    server: String,
+
+    /// Configuration file
+    #[structopt(short = "c", long = "config", parse(from_os_str))]
+    config: PathBuf,
 }
-impl Client {
-    pub fn new(listen: &str, port: &str) -> Option<Client> {
-        let mut event_queue = EventQueue::new();
 
-        let network_sender = event_queue.sender().clone();
-        let network = Network::new(move |net_event| network_sender.send(Event::Network(net_event)));
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let opt = Opt::from_args();
+    println!("{:?}", opt);
+    let result = config::get_config(opt.config);
+    match result {
+        Ok(config) => {
+            // create a synchronizer
+            let mut synchronizer = Synchronizer::new(config).unwrap();
+            // index local files
+            synchronizer.index();
 
-        let listen_addr = format!("{}:{}", &listen, &port);
-        Some(Client {
-            event_queue,
-            network,
-            listen: listen.to_string(),
-            port: port.to_string(),
-            listen_addr,
-        })
-    }
-    // Server
-    pub fn start(&mut self) -> io::Result<(usize, SocketAddr)> {
-        self.network.listen_tcp(&self.listen_addr)
-    }
-    // Client
-    pub fn connect(&mut self, target: &str) -> io::Result<Endpoint> {
-        self.network.connect_tcp(target)
-    }
-    // Client Gossip
-    pub fn gossip(&mut self) -> io::Result<(usize, SocketAddr)> {
-        self.network.listen_udp(&self.listen_addr)
-    }
+            // create a client
+            let mut client = SynchronizerClient::connect("http://[::1]:10000").await?;
+
+            println!("*** Get ChangeSet ***");
+            let response = client
+                .get_change_set(Request::new(Entries {
+                    nodes: synchronizer.entries.nodes,
+                }))
+                .await?;
+            println!("RESPONSE = {:?}", response);
+        }
+        Err(error) => {
+            println!("Error: {:?}", error);
+        }
+    };
+    Ok(())
 }

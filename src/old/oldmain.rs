@@ -1,7 +1,7 @@
-mod client;
 mod common;
 mod config;
 mod discovery_server;
+mod netclient;
 mod node;
 mod participant;
 mod synchronizer;

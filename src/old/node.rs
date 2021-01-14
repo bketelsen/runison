@@ -1,11 +1,10 @@
 use crate::config::{Config, Path};
-use crate::runison::*;
-
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
-use std::{ffi::OsString, time::SystemTime};
-/*
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+
 pub struct Node {
     pub is_dir: bool,
     pub is_file: bool,
@@ -18,31 +17,28 @@ pub struct Node {
     pub inode: u64,
     pub root_path: PathBuf,
 }
-*/
 impl Node {
     pub fn new(
-        dir: bool,
-        file: bool,
-        symlink: bool,
-        name: String,
-        path: String,
-        relative_path: String,
+        is_dir: bool,
+        is_file: bool,
+        is_symlink: bool,
+        name: OsString,
+        path: PathBuf,
+        relative_path: PathBuf,
         len: u64,
-        mod_seconds: u64,
-        mod_nano: u32,
+        modified: std::time::SystemTime,
         inode: u64,
-        root_path: String,
+        root_path: PathBuf,
     ) -> Option<Node> {
         Some(Node {
-            dir,
-            file,
-            symlink,
+            is_dir,
+            is_file,
+            is_symlink,
             name,
             path,
             relative_path,
             len,
-            mod_seconds,
-            mod_nano,
+            modified,
             inode,
             root_path,
         })
@@ -67,31 +63,16 @@ impl Node {
         let filetype = metadata.file_type();
 
         let root = Node {
-            dir: filetype.is_dir(),
-            file: filetype.is_file(),
-            symlink: filetype.is_symlink(),
-            name: String::from(path.clone().into_os_string().to_str().unwrap()),
-            path: String::from(joined.into_os_string().to_str().unwrap()),
-            relative_path: String::from(path.clone().into_os_string().to_str().unwrap()),
+            is_dir: filetype.is_dir(),
+            is_file: filetype.is_file(),
+            is_symlink: filetype.is_symlink(),
+            name: path.clone().into_os_string(),
+            path: joined,
+            relative_path: path,
             len: metadata.len(),
-            mod_seconds: match metadata
-                .modified()
-                .unwrap()
-                .duration_since(SystemTime::UNIX_EPOCH)
-            {
-                Ok(n) => n.as_secs(),
-                Err(_) => 0,
-            },
-            mod_nano: match metadata
-                .modified()
-                .unwrap()
-                .duration_since(SystemTime::UNIX_EPOCH)
-            {
-                Ok(n) => n.subsec_nanos(),
-                Err(_) => 0,
-            },
+            modified: metadata.modified().unwrap(),
             inode,
-            root_path: String::from(root_path.into_os_string().to_str().unwrap()),
+            root_path,
         };
         Some(root)
     }
